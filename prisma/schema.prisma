@@ -1,0 +1,37 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Senha {
+  id              String   @id @default(uuid())
+  numero          String
+  nome            String
+  tipo            String
+  prioridade      String
+  status          String
+  guiche          Int?
+  atendente       String?
+  horaGeracao     DateTime @default(now())
+  horaChamada     DateTime?
+  horaFinalizacao DateTime?
+}
+
+model Usuario {
+  id               String @id @default(uuid())
+  nome             String
+  email            String @unique
+  funcao           String
+  guiche           Int?
+  tiposAtendimento String? // Armazenado como JSON string ou texto simples
+}
+
+model Config {
+  key   String @id
+  value Int
+}

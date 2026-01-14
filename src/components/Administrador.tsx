@@ -1,42 +1,64 @@
-import React, { useState } from 'react';
-import { Home, Users, BarChart2, Settings, Edit2, Trash2, Plus, X, AlertTriangle, LogOut } from 'lucide-react';
-import { useSenhas, type Usuario } from '../context/SenhasContext';
-import type { Screen } from '../App';
+import React, { useState, useMemo } from 'react';
+import { Home, Users, BarChart2, Settings, Edit2, Trash2, Plus, X, AlertTriangle, LogOut, ChevronRight, User, Calendar as CalendarIcon, Filter, Download, Clock, Shield } from 'lucide-react';
+import { useSenhas, type Usuario, type Senha } from '../context/SenhasContext';
+import { useNavigate } from 'react-router-dom';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import {  format, isSameDay, isWithinInterval, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
-interface AdministradorProps {
-  onNavigate: (screen: Screen) => void;
-}
+const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
-export default function Administrador({ onNavigate }: AdministradorProps) {
-  const { senhas, usuarios, adicionarUsuario, excluirUsuario, resetarFila } = useSenhas();
+export default function Administrador() {
+  const { senhas, usuarios, adicionarUsuario, excluirUsuario, resetarFila, login, senhaAtual } = useSenhas();
+  const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
-  const [loginError, setLoginError] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [abaAtiva, setAbaAtiva] = useState<'usuarios' | 'estatisticas' | 'configuracoes'>('usuarios');
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
+  
+  // Dashboard Filters
+  const [dateRange, setDateRange] = useState<'hoje' | 'semana' | 'mes' | 'ano' | 'custom'>('hoje');
+  const [customStart, setCustomStart] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [customEnd, setCustomEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
+
   const [formData, setFormData] = useState({
     nome: '',
     email: '',
-    funcao: 'Atendente' as 'Atendente' | 'Gerador',
+    senha: '',
+    isAdmin: false,
+    funcao: 'Atendente' as 'Atendente' | 'Gerador' | 'Administrador',
     guiche: 1,
     tiposAtendimento: [] as string[]
   });
 
   // Login Logic
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (passwordInput === 'admin123') {
-      setIsAuthenticated(true);
-      setLoginError(false);
-    } else {
-      setLoginError(true);
+    setLoginError('');
+    setIsLoggingIn(true);
+    
+    try {
+        const response = await login(emailInput || 'admin', passwordInput);
+
+        if (response.success && response.user?.isAdmin) {
+            setIsAuthenticated(true);
+            setLoginError('');
+        } else {
+            setLoginError('Credenciais inválidas ou sem permissão de administrador.');
+        }
+    } finally {
+        setIsLoggingIn(false);
     }
   };
 
   const handleLogout = () => {
     setIsAuthenticated(false);
     setPasswordInput('');
+    setEmailInput('');
   };
 
   // User Management Logic
@@ -46,231 +68,507 @@ export default function Administrador({ onNavigate }: AdministradorProps) {
       nome: formData.nome,
       email: formData.email,
       funcao: formData.funcao,
-      guiche: formData.funcao === 'Atendente' ? formData.guiche : undefined,
-      tiposAtendimento: formData.tiposAtendimento // For simplicity, empty or basic default
+      guiche: formData.funcao === 'Atendente' ? Number(formData.guiche) : undefined,
+      tiposAtendimento: formData.tiposAtendimento,
+      isAdmin: formData.isAdmin,
+      senha: formData.senha
     });
     setMostrarFormulario(false);
-    setFormData({ nome: '', email: '', funcao: 'Atendente', guiche: 1, tiposAtendimento: [] });
+    setFormData({ nome: '', email: '', senha: '', isAdmin: false, funcao: 'Atendente', guiche: 1, tiposAtendimento: [] });
   };
 
-  // Queue Management
-  const handleResetQueue = () => {
-    if (confirm('Tem certeza? Isso apagará TODAS as senhas e reiniciará os contadores.')) {
-      resetarFila();
+  const handleExcluirUsuario = (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este usuário?')) {
+      excluirUsuario(id);
     }
   };
 
-  // Render Login Screen
+  // --- REPORT LOGIC ---
+  const dadosFiltrados = useMemo(() => {
+    const agora = new Date();
+    let inicio = startOfDay(agora);
+    let fim = endOfDay(agora);
+
+    if (dateRange === 'semana') {
+        inicio = startOfWeek(agora, { weekStartsOn: 0 });
+        fim = endOfWeek(agora, { weekStartsOn: 0 });
+    } else if (dateRange === 'mes') {
+        inicio = startOfMonth(agora);
+        fim = endOfMonth(agora);
+    } else if (dateRange === 'ano') {
+        inicio = startOfYear(agora);
+        fim = endOfYear(agora);
+    } else if (dateRange === 'custom') {
+        inicio = startOfDay(new Date(customStart));
+        fim = endOfDay(new Date(customEnd));
+    }
+
+    return senhas.filter(s => {
+        if (!s.horaGeracao) return false;
+        const dataRef = new Date(s.horaGeracao);
+        return isWithinInterval(dataRef, { start: inicio, end: fim });
+    });
+  }, [senhas, dateRange, customStart, customEnd]);
+
+  // Stats KPIs
+  const kpis = useMemo(() => {
+      const total = dadosFiltrados.length;
+      const concluidas = dadosFiltrados.filter(s => s.status === 'concluida').length;
+      const canceladas = dadosFiltrados.filter(s => s.status === 'cancelada').length;
+      
+      const temposEspera = dadosFiltrados
+        .filter(s => s.horaChamada && s.horaGeracao)
+        .map(s => (s.horaChamada!.getTime() - s.horaGeracao.getTime()) / 60000);
+      
+      const mediaEspera = temposEspera.length > 0 
+        ? Math.round(temposEspera.reduce((a, b) => a + b, 0) / temposEspera.length) 
+        : 0;
+
+      const temposAtendimento = dadosFiltrados
+        .filter(s => s.horaFinalizacao && s.horaChamada)
+        .map(s => (s.horaFinalizacao!.getTime() - s.horaChamada!.getTime()) / 60000);
+
+      const mediaAtendimento = temposAtendimento.length > 0 
+        ? Math.round(temposAtendimento.reduce((a, b) => a + b, 0) / temposAtendimento.length)
+        : 0;
+
+      return { total, concluidas, canceladas, mediaEspera, mediaAtendimento };
+  }, [dadosFiltrados]);
+
+  // Charts Data
+  const dadosPorTipo = useMemo(() => {
+      const counts: Record<string, number> = {};
+      dadosFiltrados.forEach(s => {
+          counts[s.tipo] = (counts[s.tipo] || 0) + 1;
+      });
+      return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [dadosFiltrados]);
+
+  const dadosPorAtendente = useMemo(() => {
+      const counts: Record<string, number> = {};
+      dadosFiltrados.forEach(s => {
+          if (s.atendente) {
+              counts[s.atendente] = (counts[s.atendente] || 0) + 1;
+          }
+      });
+      return Object.entries(counts).map(([name, value]) => ({ name, value }));
+  }, [dadosFiltrados]);
+  
+  const dadosPorDia = useMemo(() => {
+     if (dateRange === 'hoje') return [];
+     
+     const counts: Record<string, number> = {};
+     dadosFiltrados.forEach(s => {
+         const dia = format(new Date(s.horaGeracao), 'dd/MM');
+         counts[dia] = (counts[dia] || 0) + 1;
+     });
+     return Object.entries(counts).map(([name, atendimentos]) => ({ name, atendimentos }));
+  }, [dadosFiltrados, dateRange]);
+
+
+  // Login Screen
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 to-indigo-900 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-800">Acesso Restrito</h1>
-            <p className="text-gray-500 mt-2">Área Administrativa</p>
-          </div>
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-gray-700 mb-2">Senha de Acesso</label>
-              <input
-                type="password"
-                value={passwordInput}
-                onChange={e => setPasswordInput(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-purple-500 focus:outline-none"
-                placeholder="Digite a senha..."
-                autoFocus
-              />
-              {loginError && <p className="text-red-500 text-sm mt-2">Senha incorreta.</p>}
-            </div>
-            <div className="flex gap-4">
-              <button
-                type="button"
-                onClick={() => onNavigate('home')}
-                className="flex-1 py-3 text-gray-600 hover:bg-gray-100 rounded-xl transition-colors"
-              >
-                Voltar
-              </button>
-              <button
-                type="submit"
-                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl font-medium transition-colors"
-              >
-                Entrar
-              </button>
-            </div>
-          </form>
+      <div className="min-h-screen bg-secondary-900 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-glass overflow-hidden w-full max-w-md">
+           <div className="bg-primary-900 p-8 text-center">
+               <h1 className="text-3xl font-bold text-white tracking-tight">Atende<span className="text-primary-400">+</span></h1>
+               <p className="text-primary-200 mt-2 text-sm font-medium uppercase tracking-wide">Área Administrativa</p>
+           </div>
+           
+           <div className="p-8">
+               <form onSubmit={handleLogin} className="space-y-6">
+                   <div>
+                       <label className="block text-secondary-600 text-sm font-semibold mb-2">Email / Usuário</label>
+                       <input 
+                           type="text" 
+                           value={emailInput}
+                           onChange={e => setEmailInput(e.target.value)}
+                           className="w-full px-4 py-3 bg-secondary-50 border border-secondary-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none text-secondary-900"
+                           placeholder="admin"
+                           autoFocus
+                       />
+                   </div>
+                   <div>
+                       <label className="block text-secondary-600 text-sm font-semibold mb-2">Senha</label>
+                       <input 
+                           type="password" 
+                           value={passwordInput}
+                           onChange={e => setPasswordInput(e.target.value)}
+                           className="w-full px-4 py-3 bg-secondary-50 border border-secondary-200 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all outline-none text-secondary-900"
+                           placeholder="••••••••"
+                       />
+                   </div>
+                   {loginError && <div className="text-danger-500 text-sm flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> {loginError}</div>}
+                   
+                   <div className="flex gap-4 pt-2">
+                        <button type="button" onClick={() => navigate('/')} className="flex-1 py-3 text-secondary-600 hover:text-secondary-900 font-medium transition-colors text-sm">
+                            Voltar
+                        </button>
+                        <button 
+                            type="submit" 
+                            disabled={isLoggingIn}
+                            className="flex-1 bg-primary-600 hover:bg-primary-700 text-white py-3 rounded-lg font-semibold shadow-md shadow-primary-200 transition-all transform active:scale-95 disabled:opacity-50"
+                        >
+                            {isLoggingIn ? 'Entrando...' : 'Acessar'}
+                        </button>
+                   </div>
+               </form>
+           </div>
         </div>
       </div>
     );
   }
 
-  // Render Admin Dashboard
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      {/* Header */}
-      <div className="bg-white rounded-3xl shadow-sm p-6 mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={() => onNavigate('home')} className="p-2 hover:bg-gray-100 rounded-full text-gray-600">
-            <Home className="w-6 h-6" />
-          </button>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Painel Administrativo</h1>
-            <p className="text-gray-500 text-sm">Bem-vindo, Administrador</p>
+    <div className="min-h-screen bg-secondary-50 flex">
+      {/* Sidebar */}
+      <aside className="w-64 bg-white border-r border-secondary-200 hidden lg:flex flex-col shadow-soft z-10">
+          <div className="p-6 border-b border-secondary-100">
+              <h1 className="text-2xl font-bold text-primary-900 tracking-tight flex items-center gap-2">
+                  Atende<span className="text-primary-600">+</span>
+                  <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full uppercase ml-1">Admin</span>
+              </h1>
           </div>
-        </div>
-        <button onClick={handleLogout} className="flex items-center gap-2 text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl transition-colors">
-          <LogOut className="w-5 h-5" />
-          Sair
-        </button>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-4 mb-8 overflow-x-auto pb-2">
-        <button
-          onClick={() => setAbaAtiva('usuarios')}
-          className={`px-6 py-3 rounded-xl font-medium flex items-center gap-2 transition-colors ${abaAtiva === 'usuarios' ? 'bg-purple-600 text-white shadow-lg shadow-purple-200' : 'bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-        >
-          <Users className="w-5 h-5" /> Usuários
-        </button>
-        <button
-          onClick={() => setAbaAtiva('configuracoes')}
-          className={`px-6 py-3 rounded-xl font-medium flex items-center gap-2 transition-colors ${abaAtiva === 'configuracoes' ? 'bg-purple-600 text-white shadow-lg shadow-purple-200' : 'bg-white text-gray-600 hover:bg-gray-50'
-            }`}
-        >
-          <Settings className="w-5 h-5" /> Controle da Fila
-        </button>
-      </div>
+          
+          <nav className="flex-1 p-4 space-y-2">
+              <button 
+                  onClick={() => setAbaAtiva('usuarios')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${abaAtiva === 'usuarios' ? 'bg-primary-50 text-primary-700 border-l-4 border-primary-600 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}
+              >
+                  <Users className="w-5 h-5" /> Usuários
+              </button>
+              <button 
+                  onClick={() => setAbaAtiva('estatisticas')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${abaAtiva === 'estatisticas' ? 'bg-primary-50 text-primary-700 border-l-4 border-primary-600 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}
+              >
+                  <BarChart2 className="w-5 h-5" /> Relatórios
+              </button>
+              <button 
+                  onClick={() => setAbaAtiva('configuracoes')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all font-medium ${abaAtiva === 'configuracoes' ? 'bg-primary-50 text-primary-700 border-l-4 border-primary-600 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}
+              >
+                  <Settings className="w-5 h-5" /> Configurações
+              </button>
+          </nav>
+          
+          <div className="p-4 border-t border-gray-100">
+              <button onClick={handleLogout} className="w-full flex items-center gap-2 text-danger-600 hover:bg-danger-50 px-4 py-3 rounded-lg transition-colors font-medium">
+                  <LogOut className="w-5 h-5" /> Sair
+              </button>
+          </div>
+      </aside>
 
       {/* Content */}
-      <div className="grid grid-cols-1 gap-6">
+      <main className="flex-1 p-8 overflow-y-auto h-screen bg-secondary-50">
+         
+         {/* HEADER MOBILE */}
+         <div className="lg:hidden mb-6 flex justify-between items-center bg-white p-4 rounded-xl shadow-sm">
+             <h1 className="text-xl font-bold text-primary-900">Admin</h1>
+             <button onClick={handleLogout}><LogOut className="w-5 h-5 text-secondary-500" /></button>
+         </div>
 
-        {/* USERS TAB */}
-        {abaAtiva === 'usuarios' && (
-          <div className="bg-white rounded-3xl shadow-sm p-8">
-            <div className="flex justify-between items-center mb-8">
-              <h2 className="text-xl font-semibold text-gray-800">Equipe de Atendimento</h2>
-              <button
-                onClick={() => setMostrarFormulario(true)}
-                className="bg-purple-600 text-white px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-purple-700 transition-colors"
-              >
-                <Plus className="w-5 h-5" /> Novo Usuário
-              </button>
-            </div>
+         {abaAtiva === 'usuarios' && (
+             <div className="max-w-6xl mx-auto space-y-6">
+                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                     <div>
+                         <h2 className="text-2xl font-bold text-secondary-900">Gerenciar Usuários</h2>
+                         <p className="text-secondary-500">Cadastre e gerencie o acesso da sua equipe.</p>
+                     </div>
+                     <button 
+                        onClick={() => setMostrarFormulario(true)}
+                        className="bg-primary-600 hover:bg-primary-700 text-white px-5 py-2.5 rounded-lg flex items-center gap-2 transition-all shadow-md shadow-primary-200 font-medium"
+                     >
+                         <Plus className="w-5 h-5" /> Novo Usuário
+                     </button>
+                 </div>
 
-            {mostrarFormulario && (
-              <div className="mb-8 bg-gray-50 p-6 rounded-2xl border border-gray-100 animation-fade-in">
-                <form onSubmit={handleSubmitUsuario} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input
-                    placeholder="Nome Completo"
-                    required
-                    className="px-4 py-3 rounded-xl border border-gray-200"
-                    value={formData.nome}
-                    onChange={e => setFormData({ ...formData, nome: e.target.value })}
-                  />
-                  <input
-                    placeholder="Email"
-                    required
-                    type="email"
-                    className="px-4 py-3 rounded-xl border border-gray-200"
-                    value={formData.email}
-                    onChange={e => setFormData({ ...formData, email: e.target.value })}
-                  />
-                  <select
-                    className="px-4 py-3 rounded-xl border border-gray-200"
-                    value={formData.funcao}
-                    onChange={e => setFormData({ ...formData, funcao: e.target.value as any })}
-                  >
-                    <option value="Atendente">Atendente</option>
-                    <option value="Gerador">Gerador de Senhas</option>
-                  </select>
-                  {formData.funcao === 'Atendente' && (
-                    <input
-                      type="number"
-                      placeholder="Nº Guichê"
-                      className="px-4 py-3 rounded-xl border border-gray-200"
-                      value={formData.guiche}
-                      onChange={e => setFormData({ ...formData, guiche: parseInt(e.target.value) })}
-                    />
-                  )}
-                  <div className="md:col-span-2 flex justify-end gap-3 mt-2">
-                    <button type="button" onClick={() => setMostrarFormulario(false)} className="px-4 py-2 text-gray-500">Cancelar</button>
-                    <button type="submit" className="bg-purple-600 text-white px-6 py-2 rounded-xl">Salvar</button>
-                  </div>
-                </form>
-              </div>
-            )}
+                 {/* Lista de Usuários */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                     {usuarios.map(u => (
+                         <div key={u.id} className="bg-white p-6 rounded-2xl border border-secondary-200 shadow-sm hover:shadow-md transition-all group relative">
+                             <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                                 <button 
+                                    onClick={() => handleExcluirUsuario(u.id)}
+                                    className="p-2 text-danger-400 hover:text-danger-600 hover:bg-danger-50 rounded-lg transition-colors"
+                                    title="Excluir"
+                                 >
+                                     <Trash2 className="w-4 h-4" />
+                                 </button>
+                             </div>
+                             
+                             <div className="flex items-center gap-4 mb-4">
+                                 <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-sm ${u.isAdmin ? 'bg-primary-600' : 'bg-secondary-400'}`}>
+                                     {u.isAdmin ? <Shield className="w-6 h-6" /> : <User className="w-6 h-6" />}
+                                 </div>
+                                 <div className="overflow-hidden">
+                                     <h3 className="font-bold text-lg text-secondary-900 truncate">{u.nome}</h3>
+                                     <p className="text-sm text-secondary-500 truncate">{u.email}</p>
+                                 </div>
+                             </div>
+                             
+                             <div className="flex gap-2 flex-wrap">
+                                 <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wide border ${
+                                     u.funcao === 'Administrador' ? 'bg-purple-50 text-purple-700 border-purple-100' : 
+                                     u.funcao === 'Atendente' ? 'bg-blue-50 text-blue-700 border-blue-100' : 
+                                     'bg-green-50 text-green-700 border-green-100'
+                                 }`}>
+                                     {u.funcao}
+                                 </span>
+                                 {u.guiche && (
+                                     <span className="bg-secondary-100 text-secondary-600 border border-secondary-200 px-2.5 py-1 rounded-md text-xs font-bold">
+                                         Guichê {u.guiche}
+                                     </span>
+                                 )}
+                             </div>
+                         </div>
+                     ))}
+                 </div>
+                 
+                 {/* Modal Formulario */}
+                 {mostrarFormulario && (
+                     <div className="fixed inset-0 bg-secondary-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+                             <div className="bg-secondary-50 px-8 py-6 border-b border-secondary-100 flex justify-between items-center">
+                                 <h3 className="text-xl font-bold text-secondary-900">Novo Usuário</h3>
+                                 <button onClick={() => setMostrarFormulario(false)} className="text-secondary-400 hover:text-secondary-600"><X className="w-5 h-5" /></button>
+                             </div>
+                             
+                             <form onSubmit={handleSubmitUsuario} className="p-8 space-y-5">
+                                  <div className="grid grid-cols-2 gap-5">
+                                      <div>
+                                        <label className="block text-sm font-semibold text-secondary-700 mb-1.5">Nome</label>
+                                        <input
+                                          required
+                                          className="w-full px-4 py-2.5 bg-secondary-50 border border-secondary-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
+                                          value={formData.nome}
+                                          onChange={e => setFormData({ ...formData, nome: e.target.value })}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-sm font-semibold text-secondary-700 mb-1.5">Email</label>
+                                        <input
+                                          required
+                                          className="w-full px-4 py-2.5 bg-secondary-50 border border-secondary-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
+                                          value={formData.email}
+                                          onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                        />
+                                      </div>
+                                  </div>
 
-            <div className="space-y-3">
-              {usuarios.map(u => (
-                <div key={u.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 font-bold">
-                      {u.nome.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-800">{u.nome}</p>
-                      <p className="text-sm text-gray-500">{u.funcao} {u.guiche ? `- Guichê ${u.guiche}` : ''}</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => excluirUsuario(u.id)}
-                    className="text-red-400 hover:text-red-600 p-2"
-                    title="Excluir"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+                                  <div>
+                                     <label className="block text-sm font-semibold text-secondary-700 mb-1.5">Senha Inicial</label>
+                                     <input
+                                       placeholder="••••••••"
+                                       required
+                                       type="text"
+                                       className="w-full px-4 py-2.5 bg-secondary-50 border border-secondary-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
+                                       value={formData.senha}
+                                       onChange={e => setFormData({ ...formData, senha: e.target.value })}
+                                     />
+                                  </div>
 
-        {/* CONFIG TAB */}
-        {abaAtiva === 'configuracoes' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-3xl shadow-sm p-8">
-              <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
-                <AlertTriangle className="w-6 h-6 text-orange-500" />
-                Zona de Perigo
-              </h2>
+                                  <div className="grid grid-cols-2 gap-5">
+                                      <div>
+                                        <label className="block text-sm font-semibold text-secondary-700 mb-1.5">Função</label>
+                                        <select
+                                          className="w-full px-4 py-2.5 bg-secondary-50 border border-secondary-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
+                                          value={formData.funcao}
+                                          onChange={e => setFormData({ ...formData, funcao: e.target.value as any })}
+                                        >
+                                          <option value="Atendente">Atendente</option>
+                                          <option value="Gerador">Recepção</option>
+                                          <option value="Administrador">Admin</option>
+                                        </select>
+                                      </div>
+                                      
+                                      {formData.funcao === 'Atendente' && (
+                                         <div>
+                                            <label className="block text-sm font-semibold text-secondary-700 mb-1.5">Guichê</label>
+                                            <input
+                                              type="number"
+                                              className="w-full px-4 py-2.5 bg-secondary-50 border border-secondary-200 rounded-lg outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
+                                              value={formData.guiche}
+                                              onChange={e => setFormData({ ...formData, guiche: Number(e.target.value) })}
+                                            />
+                                         </div>
+                                      )}
+                                  </div>
 
-              <div className="bg-red-50 border border-red-100 rounded-2xl p-6 flex items-center justify-between">
-                <div>
-                  <h3 className="text-red-800 font-semibold text-lg">Zerar Fila do Dia</h3>
-                  <p className="text-red-600 text-sm mt-1">
-                    Isso apagará todas as senhas aguardando, chamadas e concluídas.<br />
-                    Os contadores (N001, P001) serão reiniciados.
-                  </p>
-                </div>
-                <button
-                  onClick={handleResetQueue}
-                  className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-medium transition-colors shadow-lg shadow-red-200"
-                >
-                  Zerar Tudo
-                </button>
-              </div>
-            </div>
+                                  <div className="flex items-center gap-3 py-2">
+                                      <input 
+                                        type="checkbox" 
+                                        id="isAdmin"
+                                        checked={formData.isAdmin}
+                                        onChange={e => setFormData({...formData, isAdmin: e.target.checked})}
+                                        className="w-5 h-5 rounded border-secondary-300 text-primary-600 focus:ring-primary-500"
+                                      />
+                                      <label htmlFor="isAdmin" className="text-sm font-medium text-secondary-700 cursor-pointer select-none">Conceder acesso total (Super Admin)</label>
+                                  </div>
+                                  
+                                  <div className="pt-2">
+                                      <button type="submit" className="w-full bg-primary-600 text-white py-3 rounded-lg font-bold hover:bg-primary-700 shadow-md shadow-primary-200 transition-all active:scale-95">
+                                          Salvar Usuário
+                                      </button>
+                                  </div>
+                             </form>
+                         </div>
+                     </div>
+                 )}
+             </div>
+         )}
 
-            <div className="bg-white rounded-3xl shadow-sm p-8">
-              <h2 className="text-xl font-semibold text-gray-800 mb-4">Estatísticas Rápidas</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-blue-50 p-4 rounded-xl">
-                  <p className="text-blue-600 text-sm">Total Senhas</p>
-                  <p className="text-2xl font-bold text-blue-800">{senhas.length}</p>
-                </div>
-                <div className="bg-orange-50 p-4 rounded-xl">
-                  <p className="text-orange-600 text-sm">Aguardando</p>
-                  <p className="text-2xl font-bold text-orange-800">{senhas.filter(s => s.status === 'aguardando').length}</p>
-                </div>
-                <div className="bg-green-50 p-4 rounded-xl">
-                  <p className="text-green-600 text-sm">Atendidas</p>
-                  <p className="text-2xl font-bold text-green-800">{senhas.filter(s => s.status === 'concluida').length}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+         {abaAtiva === 'estatisticas' && (
+             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                     <div>
+                         <h2 className="text-2xl font-bold text-secondary-900">Dashboard & Relatórios</h2>
+                         <p className="text-secondary-500">Visão geral do desempenho do atendimento.</p>
+                     </div>
+                     
+                     <div className="bg-white p-1.5 rounded-xl border border-secondary-200 shadow-sm flex flex-wrap gap-1">
+                         <button onClick={() => setDateRange('hoje')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${dateRange === 'hoje' ? 'bg-primary-100 text-primary-700 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}>Hoje</button>
+                         <button onClick={() => setDateRange('semana')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${dateRange === 'semana' ? 'bg-primary-100 text-primary-700 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}>Semana</button>
+                         <button onClick={() => setDateRange('mes')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${dateRange === 'mes' ? 'bg-primary-100 text-primary-700 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}>Mês</button>
+                         <button onClick={() => setDateRange('ano')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${dateRange === 'ano' ? 'bg-primary-100 text-primary-700 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}>Ano</button>
+                         <button onClick={() => setDateRange('custom')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${dateRange === 'custom' ? 'bg-primary-100 text-primary-700 shadow-sm' : 'text-secondary-600 hover:bg-secondary-50'}`}>Personalizado</button>
+                     </div>
+                 </div>
+
+                 {/* Custom Date Range Inputs */}
+                 {dateRange === 'custom' && (
+                     <div className="bg-white p-4 rounded-xl shadow-soft border border-secondary-200 flex items-center gap-4 animate-in slide-in-from-top-2">
+                         <div className="flex flex-col">
+                             <label className="text-xs font-bold text-secondary-500 uppercase mb-1">Data Início</label>
+                             <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="border border-secondary-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500" />
+                         </div>
+                         <div className="text-secondary-400"><ChevronRight className="w-5 h-5" /></div>
+                         <div className="flex flex-col">
+                            <label className="text-xs font-bold text-secondary-500 uppercase mb-1">Data Fim</label>
+                            <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="border border-secondary-300 rounded-lg px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary-500" />
+                         </div>
+                     </div>
+                 )}
+
+                 {/* KPIs Cards */}
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                     <div className="bg-white p-6 rounded-2xl shadow-soft border border-secondary-100 relative overflow-hidden group hover:shadow-lg transition-all">
+                         <div className="absolute right-0 top-0 w-24 h-24 bg-primary-50 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
+                         <div className="flex items-center gap-3 mb-3 text-primary-600 relative z-10">
+                             <Users className="w-5 h-5" />
+                             <span className="font-bold text-sm uppercase tracking-wide opacity-80">Total</span>
+                         </div>
+                         <p className="text-4xl font-bold text-secondary-900 mb-1 relative z-10">{kpis.total}</p>
+                         <p className="text-xs text-secondary-500 relative z-10">{kpis.concluidas} atendidos • {kpis.canceladas} cancelados</p>
+                     </div>
+                     
+                     <div className="bg-white p-6 rounded-2xl shadow-soft border border-secondary-100 relative overflow-hidden group hover:shadow-lg transition-all">
+                        <div className="absolute right-0 top-0 w-24 h-24 bg-success-50 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
+                         <div className="flex items-center gap-3 mb-3 text-success-600 relative z-10">
+                             <Clock className="w-5 h-5" />
+                             <span className="font-bold text-sm uppercase tracking-wide opacity-80">Espera Média</span>
+                         </div>
+                         <p className="text-4xl font-bold text-secondary-900 relative z-10">{kpis.mediaEspera} <span className="text-lg text-secondary-400 font-medium">min</span></p>
+                     </div>
+
+                     <div className="bg-white p-6 rounded-2xl shadow-soft border border-secondary-100 relative overflow-hidden group hover:shadow-lg transition-all">
+                         <div className="absolute right-0 top-0 w-24 h-24 bg-warning-50 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
+                         <div className="flex items-center gap-3 mb-3 text-warning-600 relative z-10">
+                             <Edit2 className="w-5 h-5" />
+                             <span className="font-bold text-sm uppercase tracking-wide opacity-80">Atendimento Médio</span>
+                         </div>
+                         <p className="text-4xl font-bold text-secondary-900 relative z-10">{kpis.mediaAtendimento} <span className="text-lg text-secondary-400 font-medium">min</span></p>
+                     </div>
+                     
+                     <div className="bg-white p-6 rounded-2xl shadow-soft border border-secondary-100 relative overflow-hidden group hover:shadow-lg transition-all">
+                        <div className="absolute right-0 top-0 w-24 h-24 bg-purple-50 rounded-bl-full -mr-4 -mt-4 opacity-50 group-hover:scale-110 transition-transform"></div>
+                         <div className="flex items-center gap-3 mb-3 text-purple-600 relative z-10">
+                             <BarChart2 className="w-5 h-5" />
+                             <span className="font-bold text-sm uppercase tracking-wide opacity-80">Eficiência</span>
+                         </div>
+                         <p className="text-4xl font-bold text-secondary-900 relative z-10">
+                             {kpis.total > 0 ? Math.round((kpis.concluidas / kpis.total) * 100) : 0}%
+                         </p>
+                     </div>
+                 </div>
+
+                 {/* Charts Row 1 */}
+                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                     {/* Tipos Chart */}
+                     <div className="bg-white p-8 rounded-2xl shadow-soft border border-secondary-100 h-96">
+                         <h3 className="font-bold text-secondary-700 mb-6 flex items-center gap-2 text-lg"><Filter className="w-5 h-5 text-primary-500" /> Atendimentos por Tipo</h3>
+                         <ResponsiveContainer width="100%" height="85%">
+                            <BarChart data={dadosPorTipo}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} tick={{fill: '#64748b'}} />
+                                <YAxis fontSize={12} tickLine={false} axisLine={false} tick={{fill: '#64748b'}} />
+                                <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'}} />
+                                <Bar dataKey="value" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+                            </BarChart>
+                         </ResponsiveContainer>
+                     </div>
+
+                     {/* Atendentes Chart */}
+                     <div className="bg-white p-8 rounded-2xl shadow-soft border border-secondary-100 h-96">
+                         <h3 className="font-bold text-secondary-700 mb-6 flex items-center gap-2 text-lg"><User className="w-5 h-5 text-success-500" /> Performance por Atendente</h3>
+                         <ResponsiveContainer width="100%" height="85%">
+                             <BarChart data={dadosPorAtendente} layout="vertical">
+                                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                                 <XAxis type="number" fontSize={12} tickLine={false} axisLine={false} tick={{fill: '#64748b'}} />
+                                 <YAxis dataKey="name" type="category" width={100} fontSize={12} tickLine={false} axisLine={false} tick={{fill: '#64748b'}} />
+                                 <Tooltip cursor={{fill: '#f1f5f9'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'}} />
+                                 <Bar dataKey="value" fill="#10b981" radius={[0, 6, 6, 0]} />
+                             </BarChart>
+                         </ResponsiveContainer>
+                     </div>
+                 </div>
+                 
+                 {/* Timeline Chart (Only if not 'hoje') */}
+                 {dateRange !== 'hoje' && (
+                     <div className="bg-white p-8 rounded-2xl shadow-soft border border-secondary-100 h-96">
+                         <h3 className="font-bold text-secondary-700 mb-6 flex items-center gap-2 text-lg"><CalendarIcon className="w-5 h-5 text-purple-500" /> Evolução no Período</h3>
+                         <ResponsiveContainer width="100%" height="85%">
+                             <LineChart data={dadosPorDia}>
+                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                 <XAxis dataKey="name" fontSize={12} tickLine={false} axisLine={false} tick={{fill: '#64748b'}} />
+                                 <YAxis fontSize={12} tickLine={false} axisLine={false} tick={{fill: '#64748b'}} />
+                                 <Tooltip contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'}} />
+                                 <Line type="monotone" dataKey="atendimentos" stroke="#8b5cf6" strokeWidth={3} dot={{r: 4, fill: '#8b5cf6', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 6}} />
+                             </LineChart>
+                         </ResponsiveContainer>
+                     </div>
+                 )}
+
+             </div>
+         )}
+         
+         {abaAtiva === 'configuracoes' && (
+             <div className="max-w-4xl mx-auto space-y-6">
+                 <div>
+                     <h2 className="text-2xl font-bold text-secondary-900">Configurações do Sistema</h2>
+                     <p className="text-secondary-500">Opções avançadas de gerenciamento.</p>
+                 </div>
+                 
+                 <div className="p-8 bg-danger-50 rounded-2xl border border-danger-100">
+                     <h3 className="text-danger-800 font-bold mb-2 flex items-center gap-2 text-lg">
+                         <AlertTriangle className="w-5 h-5" /> Zona de Perigo
+                     </h3>
+                     <p className="text-danger-700 text-sm mb-6 max-w-xl">Estas ações são irreversíveis e podem causar perda de dados. Tenha certeza absoluta antes de prosseguir.</p>
+                     <button 
+                        onClick={() => {
+                             if(confirm("ATENÇÃO: ISSO APAGARÁ TODAS AS SENHAS E REINICIARÁ OS CONTADORES. TEM CERTEZA?")) {
+                                 resetarFila();
+                             }
+                        }}
+                        className="bg-danger-600 hover:bg-danger-700 text-white px-6 py-3 rounded-lg font-bold shadow-lg shadow-danger-200 transition-all active:scale-95 flex items-center gap-2"
+                     >
+                         <Trash2 className="w-4 h-4" /> Zerar Fila e Contadores
+                     </button>
+                 </div>
+             </div>
+         )}
+
+      </main>
     </div>
   );
 }

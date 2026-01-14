@@ -1,14 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Volume2, Home, Clock } from 'lucide-react';
+import { Volume2, Home, Clock, AlertCircle } from 'lucide-react';
 import { useSenhas } from '../context/SenhasContext';
-import type { Screen } from '../App';
+import { useNavigate } from 'react-router-dom';
 
-interface PainelPublicoProps {
-  onNavigate: (screen: Screen) => void;
-}
-
-export default function PainelPublico({ onNavigate }: PainelPublicoProps) {
+export default function PainelPublico() {
   const { senhaAtual, ultimasSenhas } = useSenhas();
+  const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -22,16 +19,14 @@ export default function PainelPublico({ onNavigate }: PainelPublicoProps) {
     return date.toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
     });
   };
 
   const formatarData = (date: Date) => {
     return date.toLocaleDateString('pt-BR', {
       weekday: 'long',
-      year: 'numeric',
-      month: 'long',
       day: 'numeric',
+      month: 'long',
     });
   };
 
@@ -41,18 +36,13 @@ export default function PainelPublico({ onNavigate }: PainelPublicoProps) {
     if ('speechSynthesis' in window) {
       const text = `Senha ${ticket.numero}, ${ticket.nome}, Guichê ${ticket.guiche}`;
       const utterance = new SpeechSynthesisUtterance(text);
-
-      // Configurar idioma para português do Brasil
       utterance.lang = 'pt-BR';
-
-      // Tentar encontrar uma voz em português
       const voices = window.speechSynthesis.getVoices();
       const ptVoice = voices.find(voice => voice.lang.includes('pt-BR'));
       if (ptVoice) {
         utterance.voice = ptVoice;
       }
-
-      window.speechSynthesis.cancel(); // Cancelar fala anterior
+      window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utterance);
     }
   };
@@ -63,135 +53,130 @@ export default function PainelPublico({ onNavigate }: PainelPublicoProps) {
     }
   }, [senhaAtual]);
 
-  const repetirAnuncio = () => {
-    if (senhaAtual) {
-      announceTicket(senhaAtual);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-blue-700 to-blue-900 p-8">
+    <div className="min-h-screen bg-secondary-900 text-white p-8 lg:p-12 overflow-hidden flex flex-col">
       {/* Header */}
-      <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 mb-8 flex items-center justify-between">
-        <button
-          onClick={() => onNavigate('home')}
-          className="text-white hover:bg-white/20 p-3 rounded-xl transition-colors"
-        >
-          <Home className="w-8 h-8" />
-        </button>
-        <div className="text-center flex-1">
-          <h1 className="text-white text-5xl">Atende+ | Painel Público</h1>
-          <p className="text-blue-100 mt-2">Prefeitura Municipal - Bolsa Familía</p>
-        </div>
-        <div className="text-right text-white">
-          <div className="flex items-center gap-2 justify-end">
-            <Clock className="w-6 h-6" />
-            <div className="text-3xl">{formatarHora(currentTime)}</div>
+      <header className="flex items-start justify-between mb-12">
+        <div className="flex items-center gap-6">
+          <div className="w-20 h-20 bg-primary-600 rounded-2xl flex items-center justify-center shadow-lg shadow-primary-900/50">
+            <span className="text-4xl font-bold">A+</span>
           </div>
-          <div className="text-blue-100 mt-1">{formatarData(currentTime)}</div>
+          <div>
+            <h1 className="text-4xl font-bold tracking-tight">Painel de Chamadas</h1>
+            <p className="text-secondary-400 text-lg mt-1">Atendimento ao Cidadão</p>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Área Principal - Senha Atual */}
+        <div className="text-right">
+          <div className="text-6xl font-bold font-mono tracking-wider tabular-nums text-white">
+            {formatarHora(currentTime)}
+          </div>
+          <div className="text-secondary-400 text-xl font-medium mt-1 capitalize">
+            {formatarData(currentTime)}
+          </div>
+        </div>
+      </header>
+
+      {/* Back Button (Hidden in production usually, but kept for nav) */}
+      <button
+        onClick={() => navigate('/')}
+        className="fixed bottom-4 left-4 opacity-0 hover:opacity-50 text-white/50 hover:bg-white/10 p-2 rounded-lg transition-all"
+      >
+        <Home className="w-6 h-6" />
+      </button>
+
+      <main className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-12">
+        {/* Main Display - Current Ticket */}
         <div className="lg:col-span-2">
-          <div className="bg-white rounded-3xl shadow-2xl p-12 min-h-[600px] flex flex-col">
-            {senhaAtual && senhaAtual.status === 'chamada' ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center">
-                {senhaAtual.prioridade === 'prioritaria' && (
-                  <div className="bg-red-500 text-white px-8 py-3 rounded-full mb-6 inline-block animate-pulse">
-                    <span className="uppercase tracking-wide">🚨 PRIORITÁRIA</span>
-                  </div>
-                )}
+          <div className="h-full bg-secondary-800 rounded-[2.5rem] shadow-2xl border border-secondary-700 p-12 flex flex-col items-center justify-center text-center relative overflow-hidden">
 
-                <div className="mb-8">
-                  <div className="text-gray-600 text-3xl mb-4">Senha Chamada</div>
-                  <div className="text-blue-600 text-[180px] leading-none mb-4">
+            {/* Decorative Glow */}
+            {senhaAtual && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary-500/10 rounded-full blur-[100px] animate-pulse"></div>
+            )}
+
+            {senhaAtual && senhaAtual.status === 'chamada' ? (
+              <div className="relative z-10 w-full animate-in zoom-in-90 duration-300">
+                <div className="inline-flex items-center gap-3 bg-secondary-900/50 backdrop-blur-md px-6 py-2 rounded-full border border-secondary-600 mb-12">
+                  <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
+                  <span className="text-green-400 font-bold tracking-wider uppercase">Chamando Agora</span>
+                </div>
+
+                <div className="mb-10">
+                  <h2 className="text-secondary-400 text-3xl font-medium uppercase tracking-widest mb-4">Senha</h2>
+                  <div className="text-[14rem] leading-none font-bold text-white tracking-tighter tabular-nums drop-shadow-2xl">
                     {senhaAtual.numero}
                   </div>
                 </div>
 
-                <div className="bg-gray-50 rounded-2xl p-8 w-full max-w-2xl mb-8">
-                  <div className="grid grid-cols-1 gap-6">
-                    <div>
-                      <div className="text-gray-500 text-xl mb-2">Cidadão</div>
-                      <div className="text-gray-900 text-4xl">{senhaAtual.nome}</div>
-                    </div>
-                    <div>
-                      <div className="text-gray-500 text-xl mb-2">Tipo de Atendimento</div>
-                      <div className="text-gray-900 text-3xl">{senhaAtual.tipo}</div>
-                    </div>
-                    <div>
-                      <div className="text-gray-500 text-xl mb-2">Guichê</div>
-                      <div className="bg-green-500 text-white text-6xl rounded-2xl py-4 inline-block px-8">
-                        {senhaAtual.guiche}
-                      </div>
-                    </div>
+                <div className="grid grid-cols-2 gap-8 max-w-4xl mx-auto">
+                  <div className="bg-secondary-900/80 rounded-3xl p-8 border border-secondary-700">
+                    <h3 className="text-secondary-400 text-xl font-medium mb-2">Cidadão</h3>
+                    <p className="text-4xl text-white font-semibold truncate px-4">{senhaAtual.nome}</p>
+                  </div>
+                  <div className="bg-primary-600 rounded-3xl p-8 shadow-lg shadow-primary-900/50">
+                    <h3 className="text-primary-200 text-xl font-medium mb-2">Guichê</h3>
+                    <p className="text-6xl text-white font-bold">{senhaAtual.guiche}</p>
                   </div>
                 </div>
 
-
+                {senhaAtual.prioridade === 'prioritaria' && (
+                  <div className="mt-12 inline-flex items-center gap-4 bg-red-500/20 text-red-400 px-8 py-4 rounded-2xl border border-red-500/30 animate-pulse">
+                    <AlertCircle className="w-8 h-8" />
+                    <span className="text-2xl font-bold uppercase tracking-wide">Atendimento Prioritário</span>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center">
-                <div className="text-gray-300 mb-6">
-                  <Volume2 className="w-32 h-32 mx-auto" />
+              <div className="text-center relative z-10">
+                <div className="w-32 h-32 bg-secondary-700/50 rounded-full flex items-center justify-center mx-auto mb-8">
+                  <Volume2 className="w-16 h-16 text-secondary-500" />
                 </div>
-                <div className="text-gray-400 text-4xl">Aguardando chamado...</div>
-                <div className="text-gray-300 text-2xl mt-4">
-                  As senhas serão exibidas aqui
-                </div>
+                <h2 className="text-4xl font-bold text-white mb-4">Aguardando Chamada</h2>
+                <p className="text-xl text-secondary-400">Por favor, aguarde sua senha ser chamada.</p>
               </div>
             )}
           </div>
         </div>
 
-        {/* Área Lateral - Últimas Senhas */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-3xl shadow-2xl p-8">
-            <h2 className="text-gray-800 text-3xl mb-6">Últimas Chamadas</h2>
+        {/* Sidebar - History */}
+        <div className="bg-secondary-800 rounded-[2.5rem] shadow-2xl border border-secondary-700 p-8 flex flex-col">
+          <h2 className="text-2xl font-bold text-white mb-8 flex items-center gap-3">
+            <Clock className="w-6 h-6 text-primary-400" />
+            Últimas Chamadas
+          </h2>
 
-            {ultimasSenhas.length > 0 ? (
-              <div className="space-y-4">
-                {ultimasSenhas.map((senha, index) => (
-                  <div
-                    key={senha.id}
-                    className={`p-6 rounded-2xl border-2 ${index === 0
-                        ? 'bg-blue-50 border-blue-300'
-                        : 'bg-gray-50 border-gray-200'
-                      }`}
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="text-3xl text-blue-600">
-                        {senha.numero}
-                      </div>
-                      {senha.prioridade === 'prioritaria' && (
-                        <div className="bg-red-500 text-white px-3 py-1 rounded-full text-sm">
-                          PRIORITÁRIA
-                        </div>
-                      )}
-                    </div>
-                    <div className="text-gray-700 text-xl mb-2">{senha.nome}</div>
-                    <div className="text-gray-500 mb-2">{senha.tipo}</div>
-                    <div className="flex items-center justify-between">
-                      <div className="bg-green-500 text-white px-4 py-2 rounded-lg">
-                        Guichê {senha.guiche}
-                      </div>
-                      <div className="text-gray-400 text-sm">
-                        {senha.horaChamada && formatarHora(senha.horaChamada)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+          <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+            {ultimasSenhas.slice(0, 5).map((senha, index) => (
+              <div
+                key={senha.id}
+                className={`p-6 rounded-2xl border flex items-center justify-between transition-all ${index === 0
+                  ? 'bg-secondary-700/50 border-primary-500/30 shadow-lg'
+                  : 'bg-secondary-900/30 border-secondary-700/50 opacity-60'
+                  }`}
+              >
+                <div>
+                  <div className="text-3xl font-bold text-white mb-1">{senha.numero}</div>
+                  <div className="text-secondary-400 text-sm font-medium">Guichê {senha.guiche}</div>
+                </div>
+                <div className="text-right">
+                  {senha.prioridade === 'prioritaria' && (
+                    <span className="text-xs font-bold text-red-400 uppercase tracking-wider block mb-1">Prioritária</span>
+                  )}
+                  <span className="text-2xl text-primary-400 font-bold">
+                    {new Date(senha.horaChamada || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
               </div>
-            ) : (
-              <div className="text-gray-400 text-center py-12 text-xl">
-                Nenhuma senha chamada ainda
+            ))}
+            {ultimasSenhas.length === 0 && (
+              <div className="h-40 flex items-center justify-center text-secondary-600 italic">
+                Histórico vazio
               </div>
             )}
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

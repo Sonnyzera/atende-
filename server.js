@@ -22,9 +22,12 @@ async function getFullState() {
         orderBy: { horaChamada: 'desc' }
     });
 
-    // Ultimas senhas (chamadas ou concluidas recentemente)
+    // Ultimas senhas (apenas ativas: chamada ou atendendo)
     const ultimasSenhas = await prisma.senha.findMany({
-        where: { horaChamada: { not: null } },
+        where: {
+            horaChamada: { not: null },
+            status: { notIn: ['concluida', 'cancelada'] }
+        },
         orderBy: { horaChamada: 'desc' },
         take: 5
     });
@@ -36,8 +39,8 @@ async function getFullState() {
         senhas,
         senhaAtual,
         ultimasSenhas,
-        contadorNormal: configNormal ? configNormal.value : 1,
-        contadorPrioritaria: configPrioritaria ? configPrioritaria.value : 1
+        contadorNormal: configNormal ? parseInt(configNormal.value) : 1,
+        contadorPrioritaria: configPrioritaria ? parseInt(configPrioritaria.value) : 1
     };
 }
 
@@ -45,20 +48,23 @@ async function startServer() {
     // Inicializar contadores se não existirem
     try {
         const cN = await prisma.config.findUnique({ where: { key: 'contadorNormal' } });
-        if (!cN) await prisma.config.create({ data: { key: 'contadorNormal', value: 1 } });
+        if (!cN) await prisma.config.create({ data: { key: 'contadorNormal', value: '1' } });
 
         const cP = await prisma.config.findUnique({ where: { key: 'contadorPrioritaria' } });
-        if (!cP) await prisma.config.create({ data: { key: 'contadorPrioritaria', value: 1 } });
+        if (!cP) await prisma.config.create({ data: { key: 'contadorPrioritaria', value: '1' } });
 
-        // Inicializar usuários de exemplo se vazio
-        const userCount = await prisma.usuario.count();
-        if (userCount === 0) {
-            await prisma.usuario.createMany({
-                data: [
-                    { nome: 'Maria Silva', email: 'maria@prefeitura.gov', funcao: 'Atendente', guiche: 1, tiposAtendimento: JSON.stringify(['Benefícios', 'Atualização']) },
-                    { nome: 'João Santos', email: 'joao@prefeitura.gov', funcao: 'Atendente', guiche: 2, tiposAtendimento: JSON.stringify(['Cadastro Novo', 'Informações', 'Documentação']) },
-                    { nome: 'Ana Costa', email: 'ana@prefeitura.gov', funcao: 'Gerador' }
-                ]
+        // Inicializar Admin Padrão
+        const adminExists = await prisma.usuario.findFirst({ where: { isAdmin: true } });
+        if (!adminExists) {
+            console.log('Criando usuário Admin padrão...');
+            await prisma.usuario.create({
+                data: {
+                    nome: 'Administrador',
+                    email: 'admin', // Login simples
+                    senha: 'admin', // Senha simples
+                    isAdmin: true,
+                    funcao: 'Administrador'
+                }
             });
         }
     } catch (e) {
@@ -92,9 +98,30 @@ async function startServer() {
             console.error("Erro ao enviar estado inicial:", e);
         }
 
+        // --- AUTH EVENTS ---
+        socket.on('login', async (data, callback) => {
+            try {
+                const { email, password } = data;
+                const user = await prisma.usuario.findFirst({
+                    where: {
+                        email: email,
+                        senha: password // Em produção usar hash!
+                    }
+                });
+
+                if (user) {
+                    if (callback) callback({ success: true, user: { id: user.id, nome: user.nome, email: user.email, isAdmin: user.isAdmin } });
+                } else {
+                    if (callback) callback({ success: false, error: 'Credenciais inválidas' });
+                }
+            } catch (e) {
+                if (callback) callback({ success: false, error: e.message });
+            }
+        });
+
         // 2. Handle 'request_ticket'
-        socket.on('request_ticket', async (data) => {
-            console.log('Recebido request_ticket 2:', data);
+        socket.on('request_ticket', async (data, callback) => {
+            console.log('Recebido request_ticket:', data);
             try {
                 const { nome, tipo, prioridade } = data;
 
@@ -102,15 +129,15 @@ async function startServer() {
                 const prefixo = prioridade === 'prioritaria' ? 'P' : 'N';
 
                 const config = await prisma.config.findUnique({ where: { key: configKey } });
-                const contador = config ? config.value : 1;
+                const contador = config ? parseInt(config.value) : 1;
                 const numero = `${prefixo}${String(contador).padStart(3, '0')}`;
 
                 await prisma.config.update({
                     where: { key: configKey },
-                    data: { value: contador + 1 }
+                    data: { value: String(contador + 1) }
                 });
 
-                await prisma.senha.create({
+                const novaSenha = await prisma.senha.create({
                     data: {
                         numero,
                         nome,
@@ -123,9 +150,12 @@ async function startServer() {
 
                 const newState = await getFullState();
                 io.emit('stateUpdated', newState);
-                console.log('Senha criada com sucesso.');
+                console.log('Senha criada com sucesso:', numero);
+
+                if (callback) callback({ success: true, data: novaSenha });
             } catch (err) {
                 console.error('Erro em request_ticket:', err);
+                if (callback) callback({ success: false, error: err.message });
             }
         });
 
@@ -236,8 +266,8 @@ async function startServer() {
                 await prisma.senha.deleteMany({});
 
                 // Reset counters
-                await prisma.config.update({ where: { key: 'contadorNormal' }, data: { value: 1 } });
-                await prisma.config.update({ where: { key: 'contadorPrioritaria' }, data: { value: 1 } });
+                await prisma.config.update({ where: { key: 'contadorNormal' }, data: { value: '1' } });
+                await prisma.config.update({ where: { key: 'contadorPrioritaria' }, data: { value: '1' } });
 
                 const newState = await getFullState();
                 io.emit('stateUpdated', newState);
@@ -253,6 +283,7 @@ async function startServer() {
         socket.on('admin_get_users', async (callback) => {
             try {
                 const users = await prisma.usuario.findMany();
+                // Filter out password from response if needed, but for now sending all
                 if (callback) callback({ success: true, data: users });
             } catch (e) {
                 if (callback) callback({ success: false, error: e.message });
@@ -262,12 +293,14 @@ async function startServer() {
         // 8. Create User
         socket.on('admin_create_user', async (data, callback) => {
             try {
-                const { nome, email, funcao, guiche, tiposAtendimento } = data;
+                const { nome, email, senha, funcao, guiche, tiposAtendimento, isAdmin } = data;
                 await prisma.usuario.create({
                     data: {
                         nome,
                         email,
+                        senha: senha || '123456', // Default password if missing
                         funcao,
+                        isAdmin: !!isAdmin, // Force boolean
                         guiche: parseInt(guiche) || null,
                         tiposAtendimento: JSON.stringify(tiposAtendimento || [])
                     }
@@ -303,7 +336,7 @@ async function startServer() {
         socket.on('disconnect', () => { });
     });
 
-    const PORT = 3000;
+    const PORT = 3001;
     httpServer.listen(PORT, '0.0.0.0', () => {
         console.log(`Servidor rodando em http://localhost:${PORT}`);
     });

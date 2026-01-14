@@ -23,15 +23,17 @@ model Senha {
 }
 
 model Usuario {
-  id               String @id @default(uuid())
+  id               String  @id @default(uuid())
   nome             String
-  email            String @unique
+  email            String  @unique
+  senha            String? // Senha criptografada ou simples para teste
+  isAdmin          Boolean @default(false)
   funcao           String
   guiche           Int?
-  tiposAtendimento String? // Armazenado como JSON string ou texto simples
+  tiposAtendimento String? // Armazenado como JSON string
 }
 
 model Config {
   key   String @id
-  value Int
+  value String // Alterado de Int para String para flexibilidade
 }

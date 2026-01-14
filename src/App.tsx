@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Home from "./components/Home";
 import PainelPublico from "./components/PainelPublico";
 import Atendente from "./components/Atendente";
@@ -7,40 +8,23 @@ import Administrador from "./components/Administrador";
 import Dashboard from "./components/Dashboard";
 import { SenhasProvider } from "./context/SenhasContext";
 
-export type Screen =
-  | "home"
-  | "painel-publico"
-  | "atendente"
-  | "gerador"
-  | "admin"
-  | "dashboard";
-
 export default function App() {
-  const [currentScreen, setCurrentScreen] =
-    useState<Screen>("home");
-
-  const renderScreen = () => {
-    switch (currentScreen) {
-      case "home":
-        return <Home onNavigate={setCurrentScreen} />;
-      case "painel-publico":
-        return <PainelPublico onNavigate={setCurrentScreen} />;
-      case "atendente":
-        return <Atendente onNavigate={setCurrentScreen} />;
-      case "gerador":
-        return <GeradorSenhas onNavigate={setCurrentScreen} />;
-      case "admin":
-        return <Administrador onNavigate={setCurrentScreen} />;
-      case "dashboard":
-        return <Dashboard onNavigate={setCurrentScreen} />;
-      default:
-        return <Home onNavigate={setCurrentScreen} />;
-    }
-  };
-
   return (
     <SenhasProvider>
-      <div className="min-h-screen">{renderScreen()}</div>
+      <BrowserRouter>
+        <div className="min-h-screen">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/painel-publico" element={<PainelPublico />} />
+            <Route path="/atendente" element={<Atendente />} />
+            <Route path="/gerador" element={<GeradorSenhas />} />
+            <Route path="/admin" element={<Administrador />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            {/* Fallback route */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+      </BrowserRouter>
     </SenhasProvider>
   );
 }

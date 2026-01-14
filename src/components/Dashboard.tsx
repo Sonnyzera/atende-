@@ -2,14 +2,11 @@ import React from 'react';
 import { Home, Clock, Users, TrendingUp, Activity } from 'lucide-react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useSenhas } from '../context/SenhasContext';
-import type { Screen } from '../App';
+import { useNavigate } from 'react-router-dom';
 
-interface DashboardProps {
-  onNavigate: (screen: Screen) => void;
-}
-
-export default function Dashboard({ onNavigate }: DashboardProps) {
+export default function Dashboard() {
   const { senhas, usuarios } = useSenhas();
+  const navigate = useNavigate();
 
   const senhasAguardando = senhas.filter(s => s.status === 'aguardando');
   const senhasConcluidas = senhas.filter(s => s.status === 'concluida');
@@ -18,14 +15,14 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const calcularTempoMedio = () => {
     const senhasComTempo = senhas.filter(s => s.status === 'concluida' && s.horaChamada && s.horaFinalizacao);
     if (senhasComTempo.length === 0) return 0;
-    
+
     const total = senhasComTempo.reduce((acc, s) => {
       if (s.horaChamada && s.horaFinalizacao) {
         return acc + (s.horaFinalizacao.getTime() - s.horaChamada.getTime());
       }
       return acc;
     }, 0);
-    
+
     return Math.round(total / senhasComTempo.length / 60000);
   };
 
@@ -56,7 +53,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       {/* Header */}
       <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 mb-6 flex items-center justify-between">
         <button
-          onClick={() => onNavigate('home')}
+          onClick={() => navigate('/')}
           className="text-white hover:bg-white/20 p-3 rounded-xl transition-colors"
         >
           <Home className="w-6 h-6" />
@@ -121,17 +118,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         {/* Senhas Aguardando */}
         <div className="lg:col-span-1 bg-white rounded-2xl shadow-2xl p-6">
           <h2 className="text-gray-800 text-2xl mb-4">Senhas Aguardando</h2>
-          
+
           {senhasAguardando.length > 0 ? (
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {senhasAguardando.map(senha => (
                 <div
                   key={senha.id}
-                  className={`p-4 rounded-xl border-2 ${
-                    senha.prioridade === 'prioritaria'
+                  className={`p-4 rounded-xl border-2 ${senha.prioridade === 'prioritaria'
                       ? 'bg-red-50 border-red-200'
                       : 'bg-gray-50 border-gray-200'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-2xl text-gray-800">{senha.numero}</div>

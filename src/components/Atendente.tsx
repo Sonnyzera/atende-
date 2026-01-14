@@ -1,52 +1,78 @@
 import React, { useState } from 'react';
-import { Home, Phone, CheckCircle, XCircle, AlertCircle, Clock, Volume2 } from 'lucide-react';
 import { useSenhas } from '../context/SenhasContext';
-import type { Screen } from '../App';
+import { Phone, CheckCircle, Volume2, Clock, AlertCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
-interface AtendenteProps {
-  onNavigate: (screen: Screen) => void;
-}
+export default function Atendente() {
+  const { senhas, usuarios, chamarSenha, finalizarAtendimento, cancelarSenha, repetirSenha, login } = useSenhas();
+  const navigate = useNavigate();
 
-export default function Atendente({ onNavigate }: AtendenteProps) {
-  const { senhas, usuarios, chamarSenha, finalizarAtendimento, cancelarSenha, repetirSenha } = useSenhas();
-  const [usuarioSelecionado, setUsuarioSelecionado] = useState<string>('');
-  const [guiche, setGuiche] = useState(1);
+  // Auth States
   const [logado, setLogado] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // Filtrar apenas usuários com função Atendente
-  const listaAtendentes = usuarios.filter(u => u.funcao === 'Atendente');
-
-  const usuarioAtualObj = usuarios.find(u => u.id === usuarioSelecionado);
+  // User Session State
+  const [usuarioLogado, setUsuarioLogado] = useState<{ id: string, nome: string, guiche?: number, tiposAtendimento?: any } | null>(null);
+  const [guiche, setGuiche] = useState(1); // Pode ser sobrescrito pelo usuario do banco
 
   // As senhas que este atendente pode ver/chamar
   const senhasAguardando = senhas.filter(s => {
     if (s.status !== 'aguardando') return false;
-    if (usuarioAtualObj?.tiposAtendimento && usuarioAtualObj.tiposAtendimento.length > 0) {
-      return usuarioAtualObj.tiposAtendimento.includes(s.tipo);
+    if (usuarioLogado?.tiposAtendimento && usuarioLogado.tiposAtendimento.length > 0) {
+      return usuarioLogado.tiposAtendimento.includes(s.tipo);
     }
-    return true; // Se não tiver restrição, vê tudo
+    return true;
   });
 
   const senhaAtual = senhas.find(s => s.status === 'atendendo' && s.guiche === guiche);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // --- LOGIN HANDLER ---
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (usuarioSelecionado) {
-      const user = usuarios.find(u => u.id === usuarioSelecionado);
-      if (user && user.guiche) {
-        setGuiche(user.guiche);
+    setLoginError('');
+    setIsLoggingIn(true);
+
+    try {
+      const response = await login(emailInput, passwordInput);
+
+      if (response.success && response.user) {
+        // Verificar permissão
+        const u = usuarios.find(user => user.email === response.user.email);
+        const fullUser = usuarios.find(u => u.id === response.user.id);
+
+        if (fullUser && (fullUser.funcao === 'Atendente' || fullUser.isAdmin)) {
+          setLogado(true);
+          setUsuarioLogado(fullUser);
+          if (fullUser.guiche) setGuiche(fullUser.guiche);
+          setLoginError('');
+        } else {
+          setLoginError('Acesso negado. Este usuário não é um Atendente.');
+        }
+      } else {
+        setLoginError(response.error || 'Credenciais inválidas.');
       }
-      setLogado(true);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
+  const handleLogout = () => {
+    setLogado(false);
+    setUsuarioLogado(null);
+    setEmailInput('');
+    setPasswordInput('');
+  };
+
   const handleChamarSenha = () => {
-    if (!usuarioAtualObj) return;
+    if (!usuarioLogado) return;
 
     chamarSenha({
       guiche,
-      atendente: usuarioAtualObj.nome,
-      tiposPermitidos: usuarioAtualObj.tiposAtendimento
+      atendente: usuarioLogado.nome,
+      tiposPermitidos: usuarioLogado.tiposAtendimento
     });
   };
 
@@ -56,6 +82,7 @@ export default function Atendente({ onNavigate }: AtendenteProps) {
     return minutos;
   };
 
+  // --- LOGIN SCREEN ---
   if (!logado) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-600 via-green-700 to-green-900 flex items-center justify-center p-6">
@@ -64,227 +91,183 @@ export default function Atendente({ onNavigate }: AtendenteProps) {
             <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
               <Phone className="w-10 h-10 text-white" />
             </div>
-            <h1 className="text-gray-800 text-4xl mb-2">Atendente</h1>
-            <p className="text-gray-600">Selecione seu usuário para acessar</p>
+            <h1 className="text-gray-800 text-3xl font-bold mb-2">Portal do Atendente</h1>
+            <p className="text-gray-500">Identifique-se para começar</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label className="block text-gray-700 mb-2">Usuário</label>
-              <select
-                value={usuarioSelecionado}
-                onChange={e => setUsuarioSelecionado(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-green-500 focus:outline-none bg-white"
-                required
-              >
-                <option value="">Selecione...</option>
-                {listaAtendentes.map(atendente => (
-                  <option key={atendente.id} value={atendente.id}>
-                    {atendente.nome} (Guichê {atendente.guiche || 'N/A'})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-gray-700 mb-2">Confirmar Guichê</label>
+              <label className="block text-gray-700 font-semibold mb-2">Email</label>
               <input
-                type="number"
-                value={guiche}
-                onChange={e => setGuiche(Number(e.target.value))}
-                min="1"
-                max="20"
-                className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-green-500 focus:outline-none"
+                type="text"
+                value={emailInput}
+                onChange={e => setEmailInput(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-green-500 focus:outline-none bg-white transition-colors"
+                placeholder="seu@email.com"
+                autoFocus
                 required
               />
             </div>
 
-            {usuarioSelecionado && (
-              <div className="bg-blue-50 p-4 rounded-xl text-sm text-blue-800">
-                <strong>Atendimentos permitidos:</strong><br />
-                {usuarios.find(u => u.id === usuarioSelecionado)?.tiposAtendimento?.join(', ') || 'Todos'}
+            <div>
+              <label className="block text-gray-700 font-semibold mb-2">Senha</label>
+              <input
+                type="password"
+                value={passwordInput}
+                onChange={e => setPasswordInput(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-green-500 focus:outline-none bg-white transition-colors"
+                placeholder="Sua senha"
+                required
+              />
+            </div>
+
+            {loginError && (
+              <div className="p-3 bg-red-100 text-red-700 rounded-lg text-sm flex items-center gap-2">
+                <AlertCircle className="w-4 h-4" /> {loginError}
               </div>
             )}
 
             <button
               type="submit"
-              disabled={!usuarioSelecionado}
-              className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white py-4 rounded-xl transition-colors"
+              disabled={isLoggingIn}
+              className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
             >
-              Entrar
+              {isLoggingIn ? 'Entrando...' : 'Iniciar Atendimento'}
+            </button>
+
+            <button
+              type="button"
+              disabled={isLoggingIn}
+              onClick={() => navigate('/')}
+              className="w-full text-gray-500 hover:text-gray-800 font-medium py-2 transition-colors disabled:opacity-50"
+            >
+              Voltar ao Início
             </button>
           </form>
-
-          <button
-            onClick={() => onNavigate('home')}
-            className="w-full mt-4 text-gray-600 hover:text-gray-800 py-2 transition-colors"
-          >
-            Voltar ao início
-          </button>
         </div>
       </div>
     );
   }
 
+  // --- DASHBOARD ATENDENTE (LOGADO) ---
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-600 via-green-700 to-green-900 p-6">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-6 mb-6 flex items-center justify-between">
-        <button
-          onClick={() => onNavigate('home')}
-          className="text-white hover:bg-white/20 p-3 rounded-xl transition-colors"
-        >
-          <Home className="w-6 h-6" />
-        </button>
-        <div className="text-center flex-1">
-          <h1 className="text-white text-4xl">Painel do Atendente</h1>
-          <p className="text-green-100 mt-1">
-            {usuarioAtualObj?.nome} - Guichê {guiche}
-          </p>
+      <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-green-700">
+            <Phone className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-800">Guichê {guiche}</h1>
+            <p className="text-sm text-gray-500 flex items-center gap-1">
+              <CheckCircle className="w-3 h-3 text-green-500" /> {usuarioLogado?.nome}
+            </p>
+          </div>
         </div>
+
         <button
-          onClick={() => setLogado(false)}
-          className="text-white hover:bg-white/20 px-6 py-3 rounded-xl transition-colors"
+          onClick={handleLogout}
+          className="text-red-500 hover:bg-red-50 px-4 py-2 rounded-lg font-medium transition-colors"
         >
           Sair
         </button>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Área de Controle */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-3xl shadow-2xl p-8 sticky top-6">
-            <h2 className="text-gray-800 text-2xl mb-6">Controles</h2>
+      <main className="p-8 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-            {senhaAtual ? (
-              <div className="space-y-4">
-                <div className="bg-green-50 border-2 border-green-300 rounded-2xl p-6">
-                  <div className="text-green-600 mb-2">Em Atendimento</div>
-                  <div className="text-4xl text-green-600 mb-2">{senhaAtual.numero}</div>
-                  <div className="text-gray-700 text-xl mb-1">{senhaAtual.nome}</div>
-                  <div className="text-gray-600">{senhaAtual.tipo}</div>
-                  {senhaAtual.prioridade === 'prioritaria' && (
-                    <div className="bg-red-500 text-white px-3 py-1 rounded-full inline-block mt-3 text-sm">
-                      PRIORITÁRIA
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={repetirSenha}
-                  className="w-full bg-blue-500 hover:bg-blue-600 text-white py-4 rounded-xl flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Volume2 className="w-5 h-5" />
-                  Repetir Anúncio
-                </button>
-                <button
-                  onClick={() => finalizarAtendimento(senhaAtual.id)}
-                  className="w-full bg-green-500 hover:bg-green-600 text-white py-4 rounded-xl flex items-center justify-center gap-2 transition-colors"
-                >
-                  <CheckCircle className="w-5 h-5" />
-                  Finalizar Atendimento
-                </button>
+        {/* Painel de Controle (Esquerda) */}
+        <div className="lg:col-span-2 space-y-8">
 
-                <button
-                  onClick={() => cancelarSenha(senhaAtual.id)}
-                  className="w-full bg-red-500 hover:bg-red-600 text-white py-4 rounded-xl flex items-center justify-center gap-2 transition-colors"
-                >
-                  <XCircle className="w-5 h-5" />
-                  Cancelar Senha
-                </button>
-              </div>
-            ) : (
-              <div>
-                <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-6 mb-4 text-center">
-                  <AlertCircle className="w-12 h-12 text-blue-500 mx-auto mb-3" />
-                  <p className="text-gray-600">Nenhuma senha em atendimento</p>
-                </div>
-
-                <button
-                  onClick={handleChamarSenha}
-                  disabled={senhasAguardando.length === 0}
-                  className={`w-full py-6 rounded-xl flex items-center justify-center gap-2 transition-colors ${senhasAguardando.length === 0
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-green-500 hover:bg-green-600 text-white'
-                    }`}
-                >
-                  <Phone className="w-6 h-6" />
-                  <span className="text-xl">Chamar Próxima Senha</span>
-                </button>
-                {senhasAguardando.length === 0 && (
-                  <p className="text-white text-center mt-3 text-sm">
-                    Não há senhas aguardando
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Estatísticas */}
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <h3 className="text-gray-700 mb-4">Estatísticas de Hoje</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-gray-50 rounded-xl p-4 text-center">
-                  <div className="text-3xl text-green-600">
-                    {senhas.filter(s => s.status === 'concluida').length}
+          {/* Status Atual */}
+          {senhaAtual ? (
+            <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-green-100 relative">
+              <div className="absolute top-0 left-0 w-2 h-full bg-green-500"></div>
+              <div className="p-8">
+                <div className="flex justify-between items-start mb-6">
+                  <span className="bg-green-100 text-green-800 px-4 py-1.5 rounded-full font-bold uppercase tracking-wider text-sm flex items-center gap-2">
+                    <Volume2 className="w-4 h-4" /> Em Atendimento
+                  </span>
+                  <div className="text-right">
+                    <div className="text-4xl font-bold text-gray-900 tabular-nums">{senhaAtual.numero}</div>
+                    <div className="text-gray-500 mt-1">{senhaAtual.tipo}</div>
                   </div>
-                  <div className="text-gray-600 text-sm mt-1">Concluídas</div>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-4 text-center">
-                  <div className="text-3xl text-blue-600">{senhasAguardando.length}</div>
-                  <div className="text-gray-600 text-sm mt-1">Aguardando</div>
+
+                <div className="mb-8">
+                  <h3 className="text-3xl font-bold text-gray-800 mb-2">{senhaAtual.nome}</h3>
+                  <p className="text-gray-500 flex items-center gap-2">
+                    <Clock className="w-5 h-5" /> Aguardou {senhaAtual.horaChamada && calcularTempoEspera(senhaAtual.horaChamada)} min
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => finalizarAtendimento(senhaAtual.id)}
+                    className="bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-green-200 transition-all active:scale-95 flex items-center justify-center gap-3"
+                  >
+                    <CheckCircle className="w-6 h-6" /> Finalizar
+                  </button>
+                  <button
+                    onClick={repetirSenha}
+                    className="bg-blue-500 hover:bg-blue-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3"
+                  >
+                    <Volume2 className="w-6 h-6" /> Chamar Novamente
+                  </button>
                 </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-white rounded-3xl shadow-sm border border-gray-200 p-12 text-center flex flex-col items-center justify-center min-h-[400px]">
+              <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center mb-6">
+                <Clock className="w-12 h-12 text-gray-400" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Aguardando Próximo</h2>
+              <p className="text-gray-500 max-w-sm mx-auto mb-8">O guichê está livre. Clique abaixo para chamar o próximo da fila.</p>
+              <button
+                onClick={handleChamarSenha}
+                disabled={senhasAguardando.length === 0}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-12 py-5 rounded-2xl font-bold text-xl shadow-xl shadow-blue-200 transition-all transform hover:-translate-y-1 active:translate-y-0"
+              >
+                Chamar Próximo ({senhasAguardando.length})
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Fila de Senhas */}
-        <div className="lg:col-span-2">
-          <div className="bg-white rounded-3xl shadow-2xl p-8">
-            <h2 className="text-gray-800 text-3xl mb-6">Fila de Atendimento</h2>
+        {/* Fila de Espera (Direita) */}
+        <div className="bg-white rounded-3xl shadow-lg border border-gray-200 p-6 h-[calc(100vh-8rem)] flex flex-col">
+          <h3 className="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+            <Clock className="w-5 h-5 text-gray-400" /> Próximos da Fila
+          </h3>
 
-            {senhasAguardando.length > 0 ? (
-              <div className="space-y-3">
-                {senhasAguardando.map((senha, index) => (
-                  <div
-                    key={senha.id}
-                    className={`p-6 rounded-2xl border-2 transition-all ${senha.prioridade === 'prioritaria'
-                      ? 'bg-red-50 border-red-300'
-                      : 'bg-gray-50 border-gray-200'
-                      }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="text-3xl text-gray-800">{senha.numero}</div>
-                          {senha.prioridade === 'prioritaria' && (
-                            <div className="bg-red-500 text-white px-3 py-1 rounded-full text-sm">
-                              🚨 PRIORITÁRIA
-                            </div>
-                          )}
-                        </div>
-                        <div className="text-gray-700 text-xl mb-1">{senha.nome}</div>
-                        <div className="text-gray-600 mb-2">{senha.tipo}</div>
-                        <div className="flex items-center gap-2 text-gray-500 text-sm">
-                          <Clock className="w-4 h-4" />
-                          <span>Aguardando há {calcularTempoEspera(senha.horaGeracao)} minutos</span>
-                        </div>
-                      </div>
-                      <div className="bg-blue-500 text-white w-12 h-12 rounded-full flex items-center justify-center text-xl">
-                        {index + 1}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+          <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+            {senhasAguardando.length === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <AlertCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>Ninguém na fila</p>
               </div>
             ) : (
-              <div className="text-center py-12 text-gray-400">
-                <AlertCircle className="w-16 h-16 mx-auto mb-4" />
-                <p className="text-xl">Nenhuma senha aguardando atendimento</p>
-              </div>
+              senhasAguardando.map((senha, index) => (
+                <div key={senha.id} className={`p-4 rounded-2xl border ${senha.prioridade.includes('prioritaria') ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} hover:border-blue-300 transition-colors`}>
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="font-bold text-xl text-gray-800">{senha.numero}</span>
+                    {senha.prioridade.includes('prioritaria') && (
+                      <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-full font-bold uppercase">Prioridade</span>
+                    )}
+                  </div>
+                  <h4 className="font-medium text-gray-700 mb-1">{senha.nome}</h4>
+                  <div className="flex justify-between items-center text-sm text-gray-500">
+                    <span>{senha.tipo}</span>
+                    <span>{calcularTempoEspera(senha.horaGeracao)} min</span>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
-      </div>
+
+      </main>
     </div>
   );
 }

@@ -23,7 +23,8 @@ export interface Usuario {
   id: string;
   nome: string;
   email: string;
-  funcao: 'Atendente' | 'Gerador';
+  funcao: 'Atendente' | 'Gerador' | 'Administrador';
+  isAdmin?: boolean;
   guiche?: number;
   tiposAtendimento?: any; // JSON string from DB, parsed manually if needed, or string array in UI
 }
@@ -39,7 +40,7 @@ interface SenhasContextType {
   usuarios: Usuario[];
   senhaAtual: Senha | null;
   ultimasSenhas: Senha[];
-  gerarSenha: (nome: string, tipo: TipoAtendimento, prioridade: Prioridade) => Senha;
+  gerarSenha: (nome: string, tipo: TipoAtendimento, prioridade: Prioridade) => Promise<Senha>;
   chamarSenha: (options: ChamarSenhaOptions) => void;
   finalizarAtendimento: (senhaId: string) => void;
   cancelarSenha: (senhaId: string) => void;
@@ -49,6 +50,7 @@ interface SenhasContextType {
   editarUsuario: (id: string, usuario: Partial<Usuario>) => void;
   excluirUsuario: (id: string) => void;
   resetarFila: () => void;
+  login: (email: string, senha: string) => Promise<{ success: boolean; user?: any; error?: string }>;
 }
 
 const SenhasContext = createContext<SenhasContextType | undefined>(undefined);
@@ -124,19 +126,29 @@ export const SenhasProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, []);
 
-  const gerarSenha = (nome: string, tipo: TipoAtendimento, prioridade: Prioridade): Senha => {
-    if (socketRef.current) {
-      socketRef.current.emit('request_ticket', { nome, tipo, prioridade });
-    }
-    return {
-      id: 'temp',
-      numero: '...',
-      nome,
-      tipo,
-      prioridade,
-      status: 'aguardando',
-      horaGeracao: new Date()
-    };
+  const gerarSenha = (nome: string, tipo: TipoAtendimento, prioridade: Prioridade): Promise<Senha> => {
+    return new Promise((resolve, reject) => {
+      if (!socketRef.current) {
+        const temp: Senha = {
+          id: 'offline',
+          numero: 'OFF',
+          nome,
+          tipo,
+          prioridade,
+          status: 'aguardando',
+          horaGeracao: new Date()
+        };
+        return resolve(temp);
+      }
+
+      socketRef.current.emit('request_ticket', { nome, tipo, prioridade }, (response: any) => {
+        if (response.success && response.data) {
+          resolve(response.data);
+        } else {
+          reject(response.error || 'Erro ao gerar senha');
+        }
+      });
+    });
   };
 
   const chamarSenha = ({ guiche, atendente, tiposPermitidos }: ChamarSenhaOptions) => {
@@ -210,6 +222,24 @@ export const SenhasProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  const login = (email: string, senha: string): Promise<{ success: boolean; user?: any; error?: string }> => {
+    return new Promise((resolve) => {
+      if (!socketRef.current) {
+        return resolve({ success: false, error: 'Sem conexão com o servidor' });
+      }
+
+      // Timeout de segurança caso o servidor não responda (ex: versão antiga rodando)
+      const timeout = setTimeout(() => {
+        resolve({ success: false, error: 'Servidor não respondeu. Tente reiniciar o servidor (npm run dev).' });
+      }, 5000);
+
+      socketRef.current.emit('login', { email, password: senha }, (response: any) => {
+        clearTimeout(timeout);
+        resolve(response);
+      });
+    });
+  };
+
   return (
     <SenhasContext.Provider
       value={{
@@ -225,7 +255,8 @@ export const SenhasProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         editarUsuario,
         excluirUsuario,
         repetirSenha,
-        resetarFila
+        resetarFila,
+        login
       }}
     >
       {children}
